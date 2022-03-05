@@ -1,7 +1,9 @@
 use deunicode::deunicode;
-use miette::NamedSource;
+use thiserror::Error;
 
-use crate::error;
+#[derive(Debug, Error)]
+#[error("playfair key can contain only ASCII-alphabetic characters")]
+pub struct NonAsciiKey;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Text {
@@ -14,22 +16,11 @@ pub struct Playfair {
 }
 
 impl Playfair {
-    fn generate_key(keyword: &str) -> Result<Vec<char>, error::NonAsciiKey> {
+    fn generate_key(keyword: &str) -> Result<Vec<char>, NonAsciiKey> {
         // Check whether key contains only ASCII letters.
         // If there's non-ASCII-alphabetic throw an error.
         if keyword.chars().any(|letter| !letter.is_ascii_alphabetic()) {
-            let span = keyword
-                .chars()
-                .enumerate()
-                .find(|(_index, letter)| !letter.is_ascii_alphabetic())
-                .map(|(index, _)| index)
-                .expect(
-                    "This shouldn't happen. It's definitely a bug. Please file an issue on GitHub.",
-                );
-            return Err(error::NonAsciiKey::new(
-                NamedSource::new("invalid_key", keyword.to_owned()),
-                (span, span + 1),
-            ));
+            return Err(NonAsciiKey);
         }
 
         let mut final_key: Vec<char> = Vec::with_capacity(25);
@@ -37,6 +28,10 @@ impl Playfair {
         // Iterate over letters from keyword and alphabet and add missing letters to key.
         keyword
             .chars()
+            .map(char::to_lowercase)
+            .flatten()
+            // replace all occurences of 'j' with 'i'
+            .map(|letter| if letter == 'j' { 'i' } else { letter })
             .chain([
                 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'k', 'l', 'm', 'n', 'o', 'p', 'q',
                 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
@@ -151,42 +146,34 @@ impl Playfair {
             .map(|letter| if letter == 'j' { 'i' } else { letter })
             .collect();
 
-        // let mut msg = msg.chars();
-
         enum State {
             Text,
             Punctuation,
         }
 
         let mut state = State::Text;
-
         let mut sanitized: Vec<Text> = Vec::with_capacity(message.len() / 5);
         let mut text = String::with_capacity(10);
         for letter in msg.chars() {
             match state {
                 State::Text => {
-                    if letter.is_ascii_alphabetic() {
-                        text.push(letter);
-                    } else {
+                    if !letter.is_ascii_alphabetic() {
                         state = State::Punctuation;
                         sanitized.push(Text::Word(text.clone()));
                         text.clear();
-                        text.push(letter);
                     }
                 }
                 State::Punctuation => {
-                    if !letter.is_ascii_alphabetic() {
-                        text.push(letter);
-                    } else {
+                    if letter.is_ascii_alphabetic() {
                         state = State::Text;
                         sanitized.push(Text::Punctuation(text.clone()));
                         text.clear();
-                        text.push(letter);
                     }
                 }
             }
+            text.push(letter);
         }
-
+        // We have to push last word/punctuation into vector.
         match state {
             State::Text => sanitized.push(Text::Word(text)),
             State::Punctuation => sanitized.push(Text::Punctuation(text)),
@@ -195,7 +182,7 @@ impl Playfair {
         sanitized.drain(..).map(process_word).collect()
     }
 
-    pub fn new(keyword: &str) -> Result<Self, error::NonAsciiKey> {
+    pub fn new(keyword: &str) -> Result<Self, NonAsciiKey> {
         Ok(Self {
             key: Self::generate_key(keyword)?,
         })
@@ -318,12 +305,6 @@ impl Playfair {
 
         decrypted
     }
-
-    #[allow(dead_code)]
-    pub fn set_key(&mut self, key: &str) -> Result<(), error::NonAsciiKey> {
-        self.key = Self::generate_key(key)?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -345,6 +326,15 @@ mod test_playfair {
         let expected = vec![
             'k', 'r', 'y', 'p', 't', 'o', 'g', 'a', 'f', 'i', 'b', 'c', 'd', 'e', 'h', 'l', 'm',
             'n', 'q', 's', 'u', 'v', 'w', 'x', 'z',
+        ];
+        let actual = Playfair::generate_key(primary_key).expect("Unexpected NonAsciiKey error.");
+
+        assert_eq!(expected, actual);
+
+        let primary_key = "Juxtaposition";
+        let expected = vec![
+            'i', 'u', 'x', 't', 'a', 'p', 'o', 's', 'n', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'k',
+            'l', 'm', 'q', 'r', 'v', 'w', 'y', 'z',
         ];
         let actual = Playfair::generate_key(primary_key).expect("Unexpected NonAsciiKey error.");
 

@@ -1,15 +1,8 @@
-mod error;
 mod playfair;
 
 use std::io::{BufRead, Write};
 
 use playfair::Playfair;
-
-enum State {
-    Encrypt,
-    Decrypt,
-    ChangeKey,
-}
 
 fn main() {
     const MESSAGE: &str = r"
@@ -31,16 +24,21 @@ Have a great work!
 ";
 
     println!("{}", MESSAGE);
+
+    enum State {
+        Encrypt,
+        Decrypt,
+        ChangeKey,
+    }
     let mut state;
+
     let mut coder: Playfair = Playfair::new("").unwrap();
     set_keyword(&mut coder);
 
     loop {
         print!("Select action [(e)ncrypt, (d)ecrypt, (q)uit, change (k)eyword: ");
-        #[allow(unused_must_use)]
-        {
-            std::io::stdout().flush();
-        }
+        std::io::stdout().flush().ok();
+
         let mut buffer = String::new();
         match std::io::stdin().lock().read_line(&mut buffer) {
             Ok(_) => match buffer.trim() {
@@ -79,17 +77,16 @@ Have a great work!
 
 fn read_message() -> String {
     loop {
-        println!("Message:");
-        #[allow(unused_must_use)]
-        {
-            std::io::stdout().flush();
-        }
-        let mut message = String::new();
+        println!("Message (insert # to indicate message end):");
+        std::io::stdout().flush().ok();
+
+        let mut message = String::with_capacity(50);
         let input = std::io::stdin();
         for line in input.lock().lines() {
             match line {
                 Ok(line) => {
                     if line.contains('#') {
+                        // Take line part before # symbol
                         let line = line.split('#').next().unwrap();
                         message.push_str(line);
                         break;
@@ -108,20 +105,17 @@ fn read_message() -> String {
 fn set_keyword(coder: &mut Playfair) {
     loop {
         print!("Keyword: ");
-        #[allow(unused_must_use)]
-        {
-            std::io::stdout().flush();
-        }
+        std::io::stdout().flush().ok();
+
         let mut keyword = String::new();
         std::io::stdin()
             .lock()
             .read_line(&mut keyword)
             .expect("Unexpected error. Reading from stdin failed.");
-        keyword.pop();
-        match Playfair::new(&keyword) {
+        match Playfair::new(keyword.trim()) {
             Ok(mut new_coder) => std::mem::swap(coder, &mut new_coder),
             Err(_) => {
-                eprintln!("Keyword contains unallowed characters. Only allowed characters are ASCII letters.\nPlease try again.");
+                eprintln!("Keyword contains unallowed characters. Only ASCII letters are allowed.\nPlease try again.");
                 continue;
             }
         };
