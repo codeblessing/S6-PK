@@ -3,7 +3,9 @@ mod error;
 use deunicode::deunicode;
 use miette::NamedSource;
 
-fn main() {}
+fn main() {
+    
+}
 
 #[derive(Clone, Debug, PartialEq)]
 enum Text {
@@ -260,6 +262,65 @@ impl Playfair {
         encrypted
     }
 
+    pub fn decrypt(&self, message: &str) -> String {
+        let sanitized = Self::sanitize_message(&message);
+        let mut decrypted = String::with_capacity(message.len());
+
+        for text in sanitized {
+            match text {
+                Text::Word(word) => {
+                    for pair in word.chars().collect::<Vec<_>>().chunks(2) {
+                        match pair {
+                            [a, b] => {
+                                let a = self
+                                    .key
+                                    .iter()
+                                    .enumerate()
+                                    .find(|&(_index, letter)| letter == a)
+                                    .and_then(|(index, _)| Some(index))
+                                    .expect("Unexpected non-ASCII character in message.")
+                                    as isize;
+                                let b = self
+                                    .key
+                                    .iter()
+                                    .enumerate()
+                                    .find(|&(_index, letter)| letter == b)
+                                    .and_then(|(index, _)| Some(index))
+                                    .expect("Unexpected non-ASCII character in message.")
+                                    as isize;
+
+                                let a_row = a / 5;
+                                let a_col = a % 5;
+                                let b_row = b / 5;
+                                let b_col = b % 5;
+
+                                let (a_idx, b_idx) = if a_row == b_row {
+                                    let a_idx = a_row * 5 + (a_col - 1).rem_euclid(5);
+                                    let b_idx = b_row * 5 + (b_col - 1).rem_euclid(5);
+                                    (a_idx as usize, b_idx as usize)
+                                } else if a_col == b_col {
+                                    let a_idx = ((a_row - 1).rem_euclid(5)) * 5 + a_col;
+                                    let b_idx = ((b_row - 1).rem_euclid(5)) * 5 + b_col;
+                                    (a_idx as usize, b_idx as usize)
+                                } else {
+                                    let a_idx = b_row * 5 + a_col;
+                                    let b_idx = a_row * 5 + b_col;
+                                    (a_idx as usize, b_idx as usize)
+                                };
+                                decrypted.push(self.key[a_idx]);
+                                decrypted.push(self.key[b_idx]);
+                            }
+                            _ => unreachable!("Unexpected word chunk size"),
+                        }
+                    }
+                }
+                Text::Punctuation(punctuation) => decrypted.push_str(&punctuation),
+            }
+        }
+
+        decrypted
+    }
+
     #[allow(dead_code)]
     pub fn set_key(&mut self, key: &str) -> Result<(), error::NonAsciiKey> {
         self.key = Self::generate_key(key)?;
@@ -316,7 +377,7 @@ mod test_playfair {
     }
 
     #[test]
-    fn test_cipher_message() {
+    fn test_encrypt_message() {
         let encryptor = Playfair::new("kryptografia").expect("Unexpected non-ASCII keyword error.");
         let message = "Faramir caught Gollum";
         let encrypted = "ifgygsvp gdovsi aguqukvq";
@@ -331,6 +392,24 @@ mod test_playfair {
         let actual = encryptor.encrypt(message);
 
         assert_eq!(encrypted, &actual);
+    }
+
+    #[test]
+    fn test_decrypt_message() {
+        let decryptor = Playfair::new("kryptografia").expect("Unexpected non-ASCII keyword error.");
+        let encrypted = "ifgygsvp gdovsi aguqukvq";
+        let decrypted = "faramirx caught golxlumx";
+
+        let actual = decryptor.decrypt(encrypted);
+
+        assert_eq!(decrypted, &actual);
+
+        let encrypted = "cpzlcq";
+        let decrypted = "resume";
+
+        let actual = decryptor.decrypt(encrypted);
+
+        assert_eq!(decrypted, &actual);
     }
 }
 
