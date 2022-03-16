@@ -65,6 +65,9 @@ impl Playfair {
 
                     // Edge case when word is one-letter long (eg. conjunction 'i' or article 'a')
                     if text.len() < 2 {
+                        if text == "x" {
+                            return Text::Word(format!("{}a", text));
+                        }
                         return Text::Word(format!("{}x", text));
                     }
 
@@ -83,7 +86,11 @@ impl Playfair {
                             &[a, b] => {
                                 if a == b {
                                     text.push(a);
-                                    text.push('x');
+                                    if a == 'x' {
+                                        text.push('a');
+                                    } else {
+                                        text.push('x');
+                                    }
                                 } else {
                                     text.push(a);
                                     text.push(b);
