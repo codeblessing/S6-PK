@@ -61,15 +61,19 @@ Have a great work!
             State::ChangeKey => set_keyword(&mut coder),
             State::Encrypt => {
                 let message = read_message();
-                let encrypted = coder.encrypt(&message);
-                println!("Encrypted message:\n");
-                println!("{}\n", encrypted);
+                if !message.is_empty() {
+                    let encrypted = coder.encrypt(&message);
+                    println!("Encrypted message:\n");
+                    println!("{}\n", encrypted);
+                }
             }
             State::Decrypt => {
                 let message = read_message();
-                let decrypted = coder.decrypt(&message);
-                println!("Decrypted message:\n");
-                println!("{}\n", decrypted);
+                if !message.is_empty() {
+                    let decrypted = coder.decrypt(&message);
+                    println!("Decrypted message:\n");
+                    println!("{}\n", decrypted);
+                }
             }
         }
     }
