@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 ibig = "0.3.4"
 rand = "0.8.5"
+bitvec = "1.0.0"
