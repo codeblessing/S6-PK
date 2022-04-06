@@ -85,3 +85,40 @@ pub fn long_series_test(bits: &str) -> Result {
 
     Result::Passed
 }
+
+pub fn poker_test(bits: &str) -> Result {
+    let mut blobs: Vec<u8> = Vec::with_capacity(5000);
+
+    let mut blob: u8 = 0;
+    for (i, c) in bits.chars().enumerate() {
+        if c == '1' {
+            blob |= 1 << (i % 4)
+        }
+        if (i + 1) % 4 == 0 {
+            blobs.push(blob);
+            blob = 0;
+        }
+    }
+
+    let combinations: [u8; 16] = [
+        0b0000, 0b0001, 0b0010, 0b0011, 0b0100, 0b0101, 0b0110, 0b0111, 0b1000, 0b1001, 0b1010,
+        0b1011, 0b1100, 0b1101, 0b1110, 0b1111,
+    ];
+
+    let mut results = Vec::with_capacity(16);
+
+    for i in 0..16 {
+        let count = blobs.iter().filter(|&&n| n == combinations[i]).count();
+        results.push(count * count);
+    }
+
+    let sum: usize = results.iter().sum();
+
+    let x = (16.0 * sum as f64) / 5000.0 - 5000.0;
+
+    if x > 2.16 && x < 46.17 {
+        return Result::Passed;
+    }
+
+    Result::Failed
+}
