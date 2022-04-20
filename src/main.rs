@@ -11,6 +11,7 @@ fn main() {
     let length = {
         let mut buf = String::with_capacity(10);
         loop {
+            println!("Insert key length:");
             buf.clear();
             std::io::stdin()
                 .read_line(&mut buf)
@@ -28,6 +29,7 @@ fn main() {
     // RSA
     let (public_key, private_key) = rsa::generate_key_pair(length);
     let mut message = String::with_capacity(100);
+    println!("Insert message:");
     std::io::stdin().read_line(&mut message).expect("Cannot read message from stdin!");
 
     let encrypted = public_key.encrypt(message.as_bytes());
