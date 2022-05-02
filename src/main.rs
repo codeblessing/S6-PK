@@ -1,62 +1,167 @@
-#![deny(clippy::pedantic)]
+mod collisions;
+mod hashes;
+mod perf;
+mod sac;
+mod traits;
 
-use crate::dh::Key;
-mod primes;
-mod rsa;
-mod dh;
+use std::io::Write;
+use std::path::Path;
 
+use clap::{ArgEnum, Parser};
 
+use md5::Md5;
+use sha1::{Digest, Sha1};
+use sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
+use sha3::{Keccak224, Keccak256, Keccak384, Keccak512, Sha3_224, Sha3_256, Sha3_384, Sha3_512};
+use traits::HashGenerator;
 
 fn main() {
-    let length = {
-        let mut buf = String::with_capacity(10);
-        loop {
-            println!("Insert key length:");
-            buf.clear();
-            std::io::stdin()
-                .read_line(&mut buf)
-                .expect("cannot read from stdin");
-            let sanitized = buf.trim();
-            let len = sanitized.parse::<usize>().unwrap_or(0);
-            if len != 0 {
-                break len;
-            } else {
-                println!("Invalid number. Please insert correct number.")
-            }
-        }
+    let args = Args::parse();
+
+    let mut algs: Vec<Box<dyn HashGenerator>> = match args.algoritm {
+        Algorithm::ALL => vec![
+            Box::new(Sha1::new()),
+            Box::new(Sha224::new()),
+            Box::new(Sha256::new()),
+            Box::new(Sha384::new()),
+            Box::new(Sha512::new()),
+            Box::new(Sha512_224::new()),
+            Box::new(Sha512_256::new()),
+            Box::new(Keccak224::new()),
+            Box::new(Keccak256::new()),
+            Box::new(Keccak384::new()),
+            Box::new(Keccak512::new()),
+            Box::new(Sha3_224::new()),
+            Box::new(Sha3_256::new()),
+            Box::new(Sha3_384::new()),
+            Box::new(Sha3_512::new()),
+            Box::new(Md5::new()),
+        ],
+        Algorithm::SHA1 => vec![Box::new(Sha1::new())],
+        Algorithm::SHA2 => vec![
+            Box::new(Sha224::new()),
+            Box::new(Sha256::new()),
+            Box::new(Sha384::new()),
+            Box::new(Sha512::new()),
+            Box::new(Sha512_224::new()),
+            Box::new(Sha512_256::new()),
+        ],
+        Algorithm::SHA3 => vec![
+            Box::new(Keccak224::new()),
+            Box::new(Keccak256::new()),
+            Box::new(Keccak384::new()),
+            Box::new(Keccak512::new()),
+            Box::new(Sha3_224::new()),
+            Box::new(Sha3_256::new()),
+            Box::new(Sha3_384::new()),
+            Box::new(Sha3_512::new()),
+        ],
+        Algorithm::MD5 => vec![Box::new(Md5::new())],
     };
 
-    // RSA
-    let (public_key, private_key) = rsa::generate_key_pair(length);
-    let mut message = String::with_capacity(100);
-    println!("Insert message:");
-    std::io::stdin().read_line(&mut message).expect("Cannot read message from stdin!");
+    let data = read_file(args.input_file);
+    let data = if args.by_line {
+        data.lines().map(ToOwned::to_owned).collect()
+    } else {
+        vec![data]
+    };
 
-    let encrypted = public_key.encrypt(message.as_bytes());
-    let encrypted_string = String::from_utf8_lossy(&encrypted);
-
-    println!("Encrypted: {encrypted_string}");
-
-    let decrypted = private_key.decrypt(&encrypted);
-    let msg = String::from_utf8_lossy(&decrypted);
-
-    println!("Decrypted: {msg}");
-
-    assert_eq!(&message, &msg);
-
-    // Diffie-Hellman key exchange:
-
-    let mut alice = Key::create_exchange_keys(length);
-    let mut bob = Key::create_exchange_keys(length);
-    alice.create_session_key(bob.get_public_key());
-    bob.create_session_key(alice.get_public_key());
-
-    let alice_session = alice.get_session_key().expect("Alice session key exploded!");
-    let bob_session = bob.get_session_key().expect("Bob session key exploded!");
-
-    println!("Alice's session key: {alice_session}");
-    println!("Bob's session key:   {bob_session}");
-
-    assert_eq!(alice_session, bob_session);
+    if args.tests {
+        for generator in algs.iter_mut() {
+            let collisions = collisions::find_collision_on(12, generator.as_mut(), data.as_ref());
+            let times = perf::performance(generator.as_mut());
+            let sac = sac::check_sac(generator.as_mut(), data.as_ref());
+            let path = format!("output/{}.txt", generator.name());
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .append(false)
+                .create(true)
+                .open(path)
+                .expect("Could not create output file.");
+            {
+                let data = format!("{}\n", collisions.values().sum::<usize>());
+                file.write_all(data.as_bytes())
+                    .expect("Could not write into output file");
+            }
+            for (_, time) in ["Tiny", "Small", "Mid", "Big", "Huge", "Gigantic"]
+                .iter()
+                .zip(times.iter())
+            {
+                let data = format!("{}\n", time);
+                file.write_all(data.as_bytes())
+                    .expect("Could not write into output file");
+            }
+            {
+                let data = format!("{}", sac);
+                file.write_all(data.as_bytes())
+                    .expect("Could not write into output file");
+            }
+            let path = format!("output/{}-details.txt", generator.name());
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .append(false)
+                .create(true)
+                .open(path)
+                .expect("Could not create output file.");
+            for key in 0..4096 {
+                let key = format!("{:012b}", key);
+                file.write_all(
+                    format!("{}\n", collisions.get(&key).or(Some(&0)).unwrap()).as_bytes(),
+                )
+                .expect("Could not write into output file");
+            }
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .append(false)
+            .create(true)
+            .open("output/-details.txt")
+            .expect("Could not create output file.");
+        for key in 0..4096 {
+            let key = format!("{:012b}", key);
+            file.write_all(format!("\"{}\"\n", key).as_bytes())
+                .expect("Could not write into output file");
+        }
+    } else {
+        for message in &data {
+            for generator in algs.iter_mut() {
+                let name = generator.name();
+                let hash = generator.generate_hex(message.as_bytes());
+                println!("{name:12}: {hash}");
+            }
+        }
+    }
 }
 
+fn read_file(filepath: impl AsRef<Path>) -> String {
+    std::fs::read_to_string(filepath).expect("Cannot read file into string")
+}
+
+#[derive(Parser)]
+#[clap(author, version, about)]
+struct Args {
+    #[clap(
+        short = 'l',
+        long = "line-by-line",
+        help = "Treat every line from file as separate input."
+    )]
+    by_line: bool,
+
+    #[clap(arg_enum, short = 'a', long, default_value = "all")]
+    algoritm: Algorithm,
+
+    #[clap(help = "Data source file. Have to be UTF-8 text file.")]
+    input_file: String,
+
+    #[clap(short = 't', long)]
+    tests: bool,
+}
+
+#[derive(ArgEnum, Clone, Copy)]
+enum Algorithm {
+    ALL,
+    SHA1,
+    SHA2,
+    SHA3,
+    MD5,
+}
