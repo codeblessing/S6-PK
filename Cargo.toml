@@ -1,13 +1,11 @@
 [package]
-name = "hashes"
+name = "visuals"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-md-5 = "0.10.1"
-sha1 = "0.10.1"
-sha2 = "0.10.2"
-sha3 = "0.10.1"
-clap = { version = "3.1.13", features = ["derive"] }
+image = "0.24.2"
+rand = "0.8.5"
+clap = {version =  "3.1.15", features = ["derive"]}

@@ -1,167 +1,183 @@
-mod collisions;
-mod hashes;
-mod perf;
-mod sac;
-mod traits;
-
-use std::io::Write;
-use std::path::Path;
+#![feature(slice_split_at_unchecked)]
 
 use clap::{ArgEnum, Parser};
-
-use md5::Md5;
-use sha1::{Digest, Sha1};
-use sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
-use sha3::{Keccak224, Keccak256, Keccak384, Keccak512, Sha3_224, Sha3_256, Sha3_384, Sha3_512};
-use traits::HashGenerator;
+use image::{EncodableLayout, GrayImage};
+use rand::random;
 
 fn main() {
     let args = Args::parse();
 
-    let mut algs: Vec<Box<dyn HashGenerator>> = match args.algoritm {
-        Algorithm::ALL => vec![
-            Box::new(Sha1::new()),
-            Box::new(Sha224::new()),
-            Box::new(Sha256::new()),
-            Box::new(Sha384::new()),
-            Box::new(Sha512::new()),
-            Box::new(Sha512_224::new()),
-            Box::new(Sha512_256::new()),
-            Box::new(Keccak224::new()),
-            Box::new(Keccak256::new()),
-            Box::new(Keccak384::new()),
-            Box::new(Keccak512::new()),
-            Box::new(Sha3_224::new()),
-            Box::new(Sha3_256::new()),
-            Box::new(Sha3_384::new()),
-            Box::new(Sha3_512::new()),
-            Box::new(Md5::new()),
-        ],
-        Algorithm::SHA1 => vec![Box::new(Sha1::new())],
-        Algorithm::SHA2 => vec![
-            Box::new(Sha224::new()),
-            Box::new(Sha256::new()),
-            Box::new(Sha384::new()),
-            Box::new(Sha512::new()),
-            Box::new(Sha512_224::new()),
-            Box::new(Sha512_256::new()),
-        ],
-        Algorithm::SHA3 => vec![
-            Box::new(Keccak224::new()),
-            Box::new(Keccak256::new()),
-            Box::new(Keccak384::new()),
-            Box::new(Keccak512::new()),
-            Box::new(Sha3_224::new()),
-            Box::new(Sha3_256::new()),
-            Box::new(Sha3_384::new()),
-            Box::new(Sha3_512::new()),
-        ],
-        Algorithm::MD5 => vec![Box::new(Md5::new())],
-    };
-
-    let data = read_file(args.input_file);
-    let data = if args.by_line {
-        data.lines().map(ToOwned::to_owned).collect()
-    } else {
-        vec![data]
-    };
-
-    if args.tests {
-        for generator in algs.iter_mut() {
-            let collisions = collisions::find_collision_on(12, generator.as_mut(), data.as_ref());
-            let times = perf::performance(generator.as_mut());
-            let sac = sac::check_sac(generator.as_mut(), data.as_ref());
-            let path = format!("output/{}.txt", generator.name());
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .append(false)
-                .create(true)
-                .open(path)
-                .expect("Could not create output file.");
-            {
-                let data = format!("{}\n", collisions.values().sum::<usize>());
-                file.write_all(data.as_bytes())
-                    .expect("Could not write into output file");
-            }
-            for (_, time) in ["Tiny", "Small", "Mid", "Big", "Huge", "Gigantic"]
-                .iter()
-                .zip(times.iter())
-            {
-                let data = format!("{}\n", time);
-                file.write_all(data.as_bytes())
-                    .expect("Could not write into output file");
-            }
-            {
-                let data = format!("{}", sac);
-                file.write_all(data.as_bytes())
-                    .expect("Could not write into output file");
-            }
-            let path = format!("output/{}-details.txt", generator.name());
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .append(false)
-                .create(true)
-                .open(path)
-                .expect("Could not create output file.");
-            for key in 0..4096 {
-                let key = format!("{:012b}", key);
-                file.write_all(
-                    format!("{}\n", collisions.get(&key).or(Some(&0)).unwrap()).as_bytes(),
-                )
-                .expect("Could not write into output file");
-            }
+    match args.mode {
+        Mode::Encrypt => {
+            let src = image::open(args.files[0].as_str()).unwrap().into_luma8();
+            let (src, first, second) = prepare_canvas(src, args.scale);
+            let (first, second) = encode(src, first, second);
+            first.save("res/first.png").unwrap();
+            second.save("res/second.png").unwrap();
         }
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .append(false)
-            .create(true)
-            .open("output/-details.txt")
-            .expect("Could not create output file.");
-        for key in 0..4096 {
-            let key = format!("{:012b}", key);
-            file.write_all(format!("\"{}\"\n", key).as_bytes())
-                .expect("Could not write into output file");
-        }
-    } else {
-        for message in &data {
-            for generator in algs.iter_mut() {
-                let name = generator.name();
-                let hash = generator.generate_hex(message.as_bytes());
-                println!("{name:12}: {hash}");
-            }
+        Mode::Decrypt => {
+            let first = image::open(args.files[0].as_str()).unwrap().into_luma8();
+            let second = image::open(args.files[1].as_str()).unwrap().into_luma8();
+
+            let decoded = decode(first.clone(), second.clone(), args.scale);
+            decoded.save("res/decoded.png").unwrap();
         }
     }
 }
 
-fn read_file(filepath: impl AsRef<Path>) -> String {
-    std::fs::read_to_string(filepath).expect("Cannot read file into string")
+fn decode(first: GrayImage, second: GrayImage, scale: Scale) -> GrayImage {
+    let mut decoded: Vec<u8> = Vec::with_capacity(first.width() as usize * first.height() as usize);
+
+    let parts: Vec<u8> = first
+        .as_bytes()
+        .iter()
+        .zip(second.as_bytes())
+        .map(|(&x, &y)| x & y)
+        .collect();
+
+    let parts = if Scale::Proportional == scale {
+        let width = first.width() as usize;
+        parts[..]
+            .chunks(width)
+            .enumerate()
+            .filter(|(i, _)| i & 0x01 == 0)
+            .map(|(_, row)| row)
+            .flatten()
+            .copied()
+            .collect()
+    } else {
+        parts
+    };
+
+    for pair in parts[..].chunks(2) {
+        match pair {
+            [x, y] => {
+                if x != y {
+                    decoded.push(255);
+                } else {
+                    decoded.push(0);
+                }
+            }
+            _ => continue,
+        }
+    }
+
+    let (width, height) = match scale {
+        Scale::Proportional => (first.width() / 2, first.height() / 2),
+        Scale::Width => (first.width() / 2, first.height()),
+    };
+
+    GrayImage::from_vec(width, height, decoded).unwrap()
+}
+
+fn encode(
+    src: GrayImage,
+    mut first_canvas: Vec<u8>,
+    mut second_canvas: Vec<u8>,
+) -> (GrayImage, GrayImage) {
+    for &pixel in src.as_bytes() {
+        let first = layout();
+        let second = if pixel < 128 {
+            complement(&first)
+        } else {
+            first.clone()
+        };
+
+        first_canvas.extend_from_slice(&first);
+        second_canvas.extend_from_slice(&second);
+    }
+
+    let width = src.width() * 2;
+    let height = src.height();
+
+    let first = GrayImage::from_vec(width, height, first_canvas).unwrap();
+    let second = GrayImage::from_vec(width, height, second_canvas).unwrap();
+
+    (first, second)
+}
+
+fn prepare_canvas(src: GrayImage, scale: Scale) -> (GrayImage, Vec<u8>, Vec<u8>) {
+    let width = src.width() as usize;
+    let height = src.height() as usize;
+    let size = match scale {
+        Scale::Proportional => (width * 2 * height * 2) as usize,
+        Scale::Width => (width * 2 * height) as usize,
+    };
+
+    let src = match scale {
+        Scale::Proportional => {
+            let mut start = 0usize;
+
+            let mut extended_src: Vec<u8> = Vec::with_capacity(size);
+            unsafe {
+                extended_src.set_len(size);
+            }
+
+            for row in src.as_bytes().chunks(width) {
+                extended_src[start..start + width].copy_from_slice(row);
+                start += width;
+                extended_src[start..start + width].copy_from_slice(row);
+                start += width;
+            }
+
+            GrayImage::from_vec(width as u32, height as u32 * 2, extended_src).unwrap()
+        }
+        Scale::Width => src,
+    };
+
+    let canvas = Vec::with_capacity(size);
+
+    (src, canvas.clone(), canvas)
+}
+
+#[derive(PartialEq, ArgEnum, Clone)]
+enum Scale {
+    Proportional,
+    Width,
+}
+
+#[inline(always)]
+fn layout() -> [u8; 2] {
+    if random::<bool>() {
+        [0, 255]
+    } else {
+        [255, 0]
+    }
+}
+
+#[inline(always)]
+fn complement(layout: &[u8; 2]) -> [u8; 2] {
+    let &[x, y] = layout;
+    [y, x]
+}
+
+#[cfg(test)]
+mod test_visual_coding {
+    use super::*;
+
+    #[test]
+    fn test_layout_complement() {
+        let layout = [0u8, 255];
+        let complement = complement(&layout);
+
+        assert_eq!(complement, [255, 0u8]);
+    }
 }
 
 #[derive(Parser)]
-#[clap(author, version, about)]
 struct Args {
-    #[clap(
-        short = 'l',
-        long = "line-by-line",
-        help = "Treat every line from file as separate input."
-    )]
-    by_line: bool,
+    #[clap(arg_enum, short, long, help = "Available scaling modes.")]
+    scale: Scale,
 
-    #[clap(arg_enum, short = 'a', long, default_value = "all")]
-    algoritm: Algorithm,
+    #[clap(arg_enum, short, long)]
+    mode: Mode,
 
-    #[clap(help = "Data source file. Have to be UTF-8 text file.")]
-    input_file: String,
-
-    #[clap(short = 't', long)]
-    tests: bool,
+    #[clap(short, long)]
+    files: Vec<String>,
 }
 
 #[derive(ArgEnum, Clone, Copy)]
-enum Algorithm {
-    ALL,
-    SHA1,
-    SHA2,
-    SHA3,
-    MD5,
+enum Mode {
+    Encrypt,
+    Decrypt,
 }
