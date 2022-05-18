@@ -1,5 +1,3 @@
-#![feature(slice_split_at_unchecked)]
-
 use clap::{ArgEnum, Parser};
 use image::{EncodableLayout, GrayImage};
 use rand::random;
@@ -20,7 +18,11 @@ fn main() {
             let second = image::open(args.files[1].as_str()).unwrap().into_luma8();
 
             let decoded = decode(first.clone(), second.clone(), args.scale);
-            decoded.save("res/decoded.png").unwrap();
+            if let Some(name) = args.name {
+                decoded.save(format!("res/{}", name)).unwrap();
+            } else {
+                decoded.save("res/decoded.png").unwrap();
+            }
         }
     }
 }
@@ -174,6 +176,9 @@ struct Args {
 
     #[clap(short, long)]
     files: Vec<String>,
+
+    #[clap(short, long, help = "Name of output file.")]
+    name: Option<String>
 }
 
 #[derive(ArgEnum, Clone, Copy)]
