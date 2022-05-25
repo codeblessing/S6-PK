@@ -3,23 +3,43 @@ use std::error::Error;
 use image::RgbImage;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // let mut message_buffer = String::with_capacity(100);
-    // std::io::stdin().read_line(&mut message_buffer)?;
-    let message_buffer = std::fs::read_to_string("res/message.txt")?;
-    let source_image = image::io::Reader::open("res/image.png")?
-        .with_guessed_format()?
-        .decode()?;
-    let with_message = embed_message(source_image.into_rgb8(), message_buffer.as_bytes());
-    with_message.save("test.png")?;
+    let args = Args::parse();
 
-    let img_with_message = image::io::Reader::open("test.png")?
-        .with_guessed_format()?
-        .decode()?
-        .into_rgb8();
-    let decoded = read_message(&img_with_message);
-    let message = String::from_utf8_lossy(&decoded);
+    match args.mode {
+        Mode::Embed => {
+            let mut message_buffer = if let Ok(metadata) =
+                std::fs::metadata(args.message.as_ref().expect("message is required"))
+            {
+                if metadata.is_file() {
+                    std::fs::read_to_string(args.message.as_ref().unwrap())?
+                } else {
+                    panic!("given message path is not a file!");
+                }
+            } else {
+                args.message.unwrap().clone()
+            };
+            message_buffer.push('\0');
+            let source_image = image::io::Reader::open("res/image.png")?
+                .with_guessed_format()?
+                .decode()?;
+            let with_message = embed_message(source_image.into_rgb8(), message_buffer.as_bytes());
+            if let Some(name) = args.name {
+                with_message.save(name)?;
+            } else {
+                with_message.save("test.png")?;
+            }
+        }
+        Mode::Extract => {
+            let img_with_message = image::io::Reader::open(args.image)?
+                .with_guessed_format()?
+                .decode()?
+                .into_rgb8();
+            let decoded = read_message(&img_with_message);
+            let message = String::from_utf8_lossy(&decoded);
+            println!("Encoded message was: {}", message);
+        }
+    }
 
-    println!("Encoded message was: {}", message);
     Ok(())
 }
 
@@ -64,4 +84,31 @@ fn read_message(buffer: &RgbImage) -> Vec<u8> {
     }
 
     message
+        .iter()
+        .take_while(|&&val| val != 0)
+        .copied()
+        .collect()
+}
+
+use clap::{ArgEnum, Parser};
+
+#[derive(Parser)]
+struct Args {
+    #[clap(arg_enum, short, long)]
+    mode: Mode,
+
+    #[clap(short, long)]
+    image: String,
+
+    #[clap(short, long)]
+    message: Option<String>,
+
+    #[clap(short, long, help = "Name of output file.")]
+    name: Option<String>,
+}
+
+#[derive(ArgEnum, Clone, Copy)]
+enum Mode {
+    Embed,
+    Extract,
 }
