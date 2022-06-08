@@ -1,11 +1,12 @@
-use ibig::modular::{IntoModulo, ModuloRing};
-use ibig::{ubig, UBig};
 use mod_exp::mod_exp;
 use rand::{thread_rng, Rng};
 
 pub fn generate(min: u64) -> u128 {
     loop {
-        let mut number = thread_rng().gen_range(u128::from(min)..u128::MAX);
+        let number = thread_rng()
+            .gen_range(min..u64::MAX)
+            .try_into()
+            .expect("u64 somehow not fit into u128");
 
         if is_prime(number) {
             break number;
